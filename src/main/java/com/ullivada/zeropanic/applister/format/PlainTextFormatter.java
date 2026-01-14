@@ -29,7 +29,7 @@ public final class PlainTextFormatter {
 			sb.append("\n");
 		}
 		if (printedSources == 0) {
-			sb.append("No apps found (snap/flatpak not available and no desktop entries discovered).\n");
+			sb.append("No apps found.\n");
 		}
 		return sb.toString();
 	}

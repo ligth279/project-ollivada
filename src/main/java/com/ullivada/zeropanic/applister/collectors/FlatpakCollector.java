@@ -6,6 +6,7 @@ import com.ullivada.zeropanic.applister.util.CommandRunner;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 
 public final class FlatpakCollector implements InstalledAppCollector {
@@ -16,7 +17,7 @@ public final class FlatpakCollector implements InstalledAppCollector {
 
 	@Override
 	public List<InstalledApp> collect() {
-		if (!CommandRunner.isCommandAvailable("flatpak")) {
+		if (isWindows() || !CommandRunner.isCommandAvailable("flatpak")) {
 			return List.of();
 		}
 
@@ -56,5 +57,10 @@ public final class FlatpakCollector implements InstalledAppCollector {
 		}
 
 		return out;
+	}
+
+	private boolean isWindows() {
+		String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+		return os.contains("win");
 	}
 }

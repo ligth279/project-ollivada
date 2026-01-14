@@ -22,6 +22,10 @@ public final class DesktopEntryCollector implements InstalledAppCollector {
 
 	@Override
 	public List<InstalledApp> collect() {
+		if (isWindows()) {
+			return List.of();
+		}
+		
 		List<Path> roots = new ArrayList<>();
 		
 		// Use XDG_DATA_DIRS standard (portable across all Linux distros)
@@ -70,6 +74,11 @@ public final class DesktopEntryCollector implements InstalledAppCollector {
 		}
 
 		return out;
+	}
+
+	private boolean isWindows() {
+		String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+		return os.contains("win");
 	}
 
 	private Optional<InstalledApp> parseDesktopFile(Path path) {

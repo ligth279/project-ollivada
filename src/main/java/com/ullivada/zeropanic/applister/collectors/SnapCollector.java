@@ -6,6 +6,7 @@ import com.ullivada.zeropanic.applister.util.CommandRunner;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 
 public final class SnapCollector implements InstalledAppCollector {
@@ -16,7 +17,7 @@ public final class SnapCollector implements InstalledAppCollector {
 
 	@Override
 	public List<InstalledApp> collect() {
-		if (!CommandRunner.isCommandAvailable("snap")) {
+		if (isWindows() || !CommandRunner.isCommandAvailable("snap")) {
 			return List.of();
 		}
 
@@ -50,5 +51,10 @@ public final class SnapCollector implements InstalledAppCollector {
 		}
 
 		return out;
+	}
+
+	private boolean isWindows() {
+		String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+		return os.contains("win");
 	}
 }

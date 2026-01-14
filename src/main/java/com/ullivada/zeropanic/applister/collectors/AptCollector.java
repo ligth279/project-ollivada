@@ -26,7 +26,7 @@ public final class AptCollector implements InstalledAppCollector {
 
 	@Override
 	public List<InstalledApp> collect() {
-		if (!CommandRunner.isCommandAvailable("dpkg-query")) {
+		if (isWindows() || !CommandRunner.isCommandAvailable("dpkg-query")) {
 			return List.of();
 		}
 
@@ -92,5 +92,10 @@ public final class AptCollector implements InstalledAppCollector {
 			// best-effort; fall back to all installed packages
 			return Set.of();
 		}
+	}
+
+	private boolean isWindows() {
+		String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+		return os.contains("win");
 	}
 }
