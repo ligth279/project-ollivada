@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -16,7 +17,9 @@ import org.springframework.web.client.RestTemplate;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+
 @Service
 public class NewsService {
 
@@ -38,63 +41,67 @@ public class NewsService {
     @Value("${gemini.api.key}")
     private String geminiApiKey;
 
-    // SCORING WEIGHTS
+    @Value("${supabase.url}")
+    private String supabaseUrl;
+
+    @Value("${supabase.key}")
+    private String supabaseKey;
+
+    @Value("${supabase.table}")
+    private String supabaseTable;
+
+    // We process only Top 5 to ensure we get rich data without timeouts
+    private static final int EXTRACTION_BATCH_LIMIT = 5;
+
+    // Keyword Weights for Algorithmic Filtering
     private static final Map<String, Integer> KEYWORD_WEIGHTS = new HashMap<>();
     static {
-        // High confidence words (Definite Cybersec)
         KEYWORD_WEIGHTS.put("ransomware", 10);
-        KEYWORD_WEIGHTS.put("malware", 10);
-        KEYWORD_WEIGHTS.put("ddos", 10);
-        KEYWORD_WEIGHTS.put("zero-day", 10);
-        KEYWORD_WEIGHTS.put("cve-", 10);
-        KEYWORD_WEIGHTS.put("phishing", 8);
-        KEYWORD_WEIGHTS.put("infosec", 8);
-
-        // Medium confidence words (Could be general tech or life hacks)
+        KEYWORD_WEIGHTS.put("vulnerability", 8);
+        KEYWORD_WEIGHTS.put("exploit", 8);
+        KEYWORD_WEIGHTS.put("patch", 5);
+        KEYWORD_WEIGHTS.put("breach", 5);
+        KEYWORD_WEIGHTS.put("bug", 3);
+        KEYWORD_WEIGHTS.put("flaw", 3);
         KEYWORD_WEIGHTS.put("hack", 2);
-        KEYWORD_WEIGHTS.put("breach", 3);
-        KEYWORD_WEIGHTS.put("security", 2);
-        KEYWORD_WEIGHTS.put("privacy", 2);
-        KEYWORD_WEIGHTS.put("data", 1);
-        KEYWORD_WEIGHTS.put("password", 2);
-
-        // Negative weights (Usually irrelevant)
-        KEYWORD_WEIGHTS.put("life hack", -20);
-        KEYWORD_WEIGHTS.put("kitchen", -20);
-        KEYWORD_WEIGHTS.put("beauty", -20);
     }
 
     public Object getNewsHeadlines() {
+        // 1. Fetch News
         String url = newsApiUrl + newsApiKey;
         JsonNode root = restTemplate.getForObject(url, JsonNode.class);
         JsonNode articlesNode = root.path("articles");
 
-        List<JsonNode> finalArticles = new ArrayList<>();
+        List<JsonNode> filteredArticles = new ArrayList<>();
 
+        // 2. Filter Locally (Algorithm Only)
         if (articlesNode.isArray()) {
             for (JsonNode article : articlesNode) {
-                String title = article.path("title").asText("").toLowerCase();
+                String title = article.path("title").asText("").trim();
+                int score = calculateScore(title.toLowerCase());
                 
-                // 1. Calculate Local Score
-                int score = calculateScore(title);
-
-                // 2. filtering Logic
-                if (score >= 5) {
-                    // High Probability: Keep it automatically
-                    finalArticles.add(article);
-                } else if (score >= 2) {
-                    // Medium Probability: Ask Gemini (Token Usage here only)
-                    if (verifyWithGemini(title)) {
-                        finalArticles.add(article);
-                    }
-                } 
-                // If score < 2, we drop it (save tokens, reduce noise)
+                // Keep only relevant news (Score > 3)
+                if (score >= 3) {
+                    filteredArticles.add(article);
+                }
             }
         }
 
+        System.out.println("Algorithm found " + filteredArticles.size() + " relevant articles.");
+
+        // 3. Take Top X for Extraction
+        List<JsonNode> batchToProcess = filteredArticles.stream()
+                .limit(EXTRACTION_BATCH_LIMIT)
+                .collect(Collectors.toList());
+
+        // 4. Extract Data using Gemini & Store in Supabase
+        if (!batchToProcess.isEmpty()) {
+            extractAndStoreData(batchToProcess);
+        }
+
         ObjectNode response = objectMapper.createObjectNode();
-        response.put("total_filtered_results", finalArticles.size());
-        response.set("articles", objectMapper.valueToTree(finalArticles));
+        response.put("status", "Success");
+        response.put("message", "Processed and stored " + batchToProcess.size() + " articles in Supabase.");
         return response;
     }
 
@@ -108,37 +115,107 @@ public class NewsService {
         return score;
     }
 
-    private boolean verifyWithGemini(String title) {
+    // --- GEMINI EXTRACTION & SUPABASE STORAGE ---
+    private void extractAndStoreData(List<JsonNode> articles) {
         try {
-            // Construct the Gemini API Request
-            // We use a very strict prompt to save tokens and ensure boolean-like answer
-            String promptText = "Is this headline about Cybersecurity? Answer strictly with YES or NO. Headline: \"" + title + "\"";
+            // A. Prepare Prompt
+            StringBuilder prompt = new StringBuilder();
+            prompt.append("Analyze the following news headlines and descriptions. ");
+            prompt.append("Extract structured data for a security database. ");
+            prompt.append("Return strictly a JSON Array of objects with these keys: ");
+            prompt.append("'title', 'target_app' (the specific app/company affected, e.g. 'Zoom', 'Windows', or 'Unknown'), ");
+            prompt.append("'description' (short summary), 'severity' (Low, Medium, High, Critical). ");
+            prompt.append("Input Data:\n");
 
-            // JSON Structure for Gemini API
-            String requestBody = "{"
-                    + "\"contents\": [{"
-                    + "\"parts\": [{\"text\": \"" + promptText + "\"}]"
-                    + "}]"
-                    + "}";
+            for (int i = 0; i < articles.size(); i++) {
+                JsonNode a = articles.get(i);
+                String t = a.path("title").asText("").replace("\"", "'");
+                String d = a.path("description").asText("").replace("\"", "'");
+                // Pass the original URL so we can map it back later if needed, 
+                // but Gemini output doesn't strictly need to echo it back if we map by index.
+                // To keep it simple, we ask Gemini to return the index or we map by order.
+                prompt.append("Item " + i + ": Title: " + t + " | Desc: " + d + "\n");
+            }
+
+            // B. Call Gemini
+            ObjectNode contentNode = objectMapper.createObjectNode();
+            ObjectNode partNode = objectMapper.createObjectNode();
+            partNode.put("text", prompt.toString());
+            ArrayNode partsArray = objectMapper.createArrayNode();
+            partsArray.add(partNode);
+            contentNode.set("parts", partsArray);
+            ArrayNode contentsArray = objectMapper.createArrayNode();
+            contentsArray.add(contentNode);
+            ObjectNode requestBody = objectMapper.createObjectNode();
+            requestBody.set("contents", contentsArray);
 
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
-            HttpEntity<String> entity = new HttpEntity<>(requestBody, headers);
+            HttpEntity<JsonNode> entity = new HttpEntity<>(requestBody, headers);
 
-            String fullUrl = geminiApiUrl + geminiApiKey;
-            JsonNode response = restTemplate.postForObject(fullUrl, entity, JsonNode.class);
+            String geminiUrl = geminiApiUrl + geminiApiKey;
+            JsonNode response = restTemplate.postForObject(geminiUrl, entity, JsonNode.class);
 
-            // Extract text from Gemini response
-            String answer = response.path("candidates").get(0)
-                    .path("content").path("parts").get(0)
-                    .path("text").asText().trim().toUpperCase();
+            // C. Parse Gemini Response
+            if (response != null && response.has("candidates")) {
+                String rawText = response.path("candidates").get(0)
+                        .path("content").path("parts").get(0)
+                        .path("text").asText();
+                
+                // Clean Markdown
+                rawText = rawText.replace("```json", "").replace("```", "").trim();
+                
+                JsonNode extractedData = objectMapper.readTree(rawText);
 
-            return answer.contains("YES");
+                // D. Push to Supabase
+                if (extractedData.isArray()) {
+                    for (int i = 0; i < extractedData.size(); i++) {
+                        JsonNode item = extractedData.get(i);
+                        
+                        // Merge the original URL back in (since Gemini doesn't generate URLs)
+                        String originalUrl = "";
+                        if (i < articles.size()) {
+                            originalUrl = articles.get(i).path("url").asText();
+                        }
+
+                        saveToSupabase(item, originalUrl);
+                    }
+                }
+            }
 
         } catch (Exception e) {
-            // If API fails, default to false to stay safe, or true if you prefer noise over silence
-            System.err.println("Gemini check failed for: " + title);
-            return false; 
+            System.err.println("Extraction Failed: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    private void saveToSupabase(JsonNode geminiData, String originalUrl) {
+        try {
+            // Build the JSON payload for Supabase
+            ObjectNode payload = objectMapper.createObjectNode();
+            payload.put("title", geminiData.path("title").asText());
+            payload.put("target_app", geminiData.path("target_app").asText());
+            payload.put("description", geminiData.path("description").asText());
+            payload.put("severity", geminiData.path("severity").asText());
+            payload.put("url", originalUrl);
+
+            // Prepare Request
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.set("apikey", supabaseKey);
+            headers.set("Authorization", "Bearer " + supabaseKey);
+            headers.set("Prefer", "return=minimal"); // Don't return the full object, just 201 Created
+
+            HttpEntity<String> entity = new HttpEntity<>(payload.toString(), headers);
+
+            // Send POST
+            String dbUrl = supabaseUrl + "/rest/v1/" + supabaseTable;
+            restTemplate.postForEntity(dbUrl, entity, String.class);
+
+            System.out.println("Saved to Supabase: " + geminiData.path("target_app").asText());
+
+        } catch (Exception e) {
+            System.err.println("Supabase Insert Failed: " + e.getMessage());
         }
     }
 }
