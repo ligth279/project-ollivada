@@ -26,33 +26,3 @@ In the modern digital age, users are bombarded with news of data breaches, hacks
 4.  **Selective Alerting:**
     * *Scenario A:* A massive leak hits **Instagram**. You have Instagram installed. **Action:** The system alerts you immediately with steps to change your password.
     * *Scenario B:* A massive leak hits **X.com (Twitter)**. You do not use X. **Action:** The system remains silent. You are safe.
-
----
-
-## ⚙️ How It Works
-
-### 1. Asset Discovery (The User Profile)
-The user inputs their "digital stack" (or the app scans installed packages locally). This data is stored **locally and encrypted**—it is never uploaded to the cloud to ensure privacy.
-
-* **Example Profile:** `['Instagram', 'WhatsApp', 'Wells Fargo', 'Windows 11']`
-
-### 2. The Threat Engine
-The backend aggregates data from:
-* NIST NVD (National Vulnerability Database)
-* Vendor Security Bulletins
-* Tech News RSS Feeds
-* "Have I Been Pwned" API
-
-### 3. The Logic Layer (AI Filter)
-The system uses NLP (Natural Language Processing) to parse threat reports and match them against the user profile.
-
-```python
-# Pseudocode Logic Example
-def check_relevance(threat_report, user_apps):
-    affected_service = extract_entity(threat_report) # AI extracts "Instagram" from news
-    
-    if affected_service in user_apps:
-        priority = calculate_risk_score(threat_report)
-        send_alert(priority, affected_service)
-    else:
-        log_event("Irrelevant threat suppressed to avoid panic.")
