@@ -27,9 +27,16 @@ public final class WindowsRegistryCollector implements InstalledAppCollector {
 		}
 
 		List<InstalledApp> apps = new ArrayList<>();
+		System.err.println("[DEBUG] Reading HKLM uninstall keys...");
 		apps.addAll(readUninstallKey("HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall"));
+		System.err.println("[DEBUG] Found " + apps.size() + " apps from HKLM");
+		
 		apps.addAll(readUninstallKey("HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall"));
+		System.err.println("[DEBUG] Total after WOW6432Node: " + apps.size());
+		
 		apps.addAll(readUninstallKey("HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall"));
+		System.err.println("[DEBUG] Total after HKCU: " + apps.size());
+		
 		return apps;
 	}
 
@@ -42,13 +49,15 @@ public final class WindowsRegistryCollector implements InstalledAppCollector {
 		List<InstalledApp> apps = new ArrayList<>();
 		try {
 			List<String> subkeys = execRegistryQuery(registryPath);
+			System.err.println("[DEBUG] Found " + subkeys.size() + " subkeys in " + registryPath);
 			for (String subkey : subkeys) {
 				if (subkey.startsWith(registryPath)) {
 					readAppFromSubkey(subkey).ifPresent(apps::add);
 				}
 			}
 		} catch (Exception e) {
-			// Best-effort collection
+			System.err.println("[DEBUG] Error reading " + registryPath + ": " + e.getMessage());
+			e.printStackTrace();
 		}
 		return apps;
 	}
@@ -110,21 +119,22 @@ public final class WindowsRegistryCollector implements InstalledAppCollector {
 			try (BufferedReader reader = new BufferedReader(new InputStreamReader(proc.getInputStream(), StandardCharsets.UTF_8))) {
 				String line;
 				while ((line = reader.readLine()) != null) {
-					if (line.contains(valueName) && line.contains("REG_SZ")) {
-						String[] parts = line.split("REG_SZ");
-						if (parts.length > 1) {
-							String val = parts[1].trim();
-							if (!val.isEmpty()) {
-								return Optional.of(val);
+					if (line.contains(valueName)) {
+						String[] types = {"REG_SZ", "REG_DWORD", "REG_MULTI_SZ", "REG_EXPAND_SZ"};
+						for (String type : types) {
+							if (line.contains(type)) {
+								String[] parts = line.split(type);
+								if (parts.length > 1) {
+									return Optional.of(parts[1].trim());
+								}
 							}
 						}
-						break;
 					}
 				}
 				proc.waitFor();
 			}
 		} catch (Exception e) {
-			// Ignore
+			// Ignore errors (key not found, permission denied, etc)
 		}
 		return Optional.empty();
 	}
