@@ -65,7 +65,8 @@ public class DatabaseService implements AutoCloseable {
             stmt.executeUpdate("""
                 CREATE TABLE IF NOT EXISTS scan_metadata (
                     id INTEGER PRIMARY KEY CHECK (id = 1),
-                    last_scan_at INTEGER NOT NULL
+                    last_scan_at INTEGER NOT NULL,
+                    last_supabase_check_at INTEGER DEFAULT 0
                 )
                 """);
         }
@@ -118,6 +119,43 @@ public class DatabaseService implements AutoCloseable {
             }
         }
         return false;
+    }
+
+    /**
+     * Check if last Supabase check was within the specified hours.
+     */
+    public boolean wasSupabaseCheckedWithinHours(int hours) throws SQLException {
+        String sql = "SELECT last_supabase_check_at FROM scan_metadata WHERE id = 1";
+        try (Statement stmt = connection.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+            if (rs.next()) {
+                long lastCheckAt = rs.getLong("last_supabase_check_at");
+                if (lastCheckAt == 0) {
+                    return false; // Never checked
+                }
+                long nowSeconds = Instant.now().getEpochSecond();
+                long hoursDiff = (nowSeconds - lastCheckAt) / 3600;
+                return hoursDiff < hours;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Update Supabase check timestamp.
+     */
+    public void updateSupabaseCheckTimestamp() throws SQLException {
+        long now = Instant.now().getEpochSecond();
+        String sql = """
+            INSERT INTO scan_metadata (id, last_scan_at, last_supabase_check_at) 
+            VALUES (1, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET last_supabase_check_at = excluded.last_supabase_check_at
+            """;
+        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+            pstmt.setLong(1, now); // Use current time for last_scan_at if inserting
+            pstmt.setLong(2, now);
+            pstmt.executeUpdate();
+        }
     }
 
     /**

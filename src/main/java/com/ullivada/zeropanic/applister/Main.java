@@ -9,6 +9,7 @@ import com.ullivada.zeropanic.applister.collectors.WindowsRegistryCollector;
 import com.ullivada.zeropanic.applister.database.DatabaseService;
 import com.ullivada.zeropanic.applister.format.PlainTextFormatter;
 import com.ullivada.zeropanic.applister.model.InstalledApp;
+import com.ullivada.zeropanic.applister.supabase.SupabaseService;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -26,30 +27,33 @@ import java.util.Set;
 
 public final class Main {
 	private static final int SCAN_INTERVAL_HOURS = 20;
+	private static final int SUPABASE_CHECK_INTERVAL_HOURS = 5;
 
 	public static void main(String[] args) {
 		try {
 			ensureDatabaseDirectory();
 			
 			try (DatabaseService db = new DatabaseService()) {
+				List<InstalledApp> apps;
+				
 				// Check if we scanned recently
 				if (db.wasScannedWithinHours(SCAN_INTERVAL_HOURS)) {
 					System.out.println("[Info] Using cached data (last scan < " + SCAN_INTERVAL_HOURS + " hours ago)\n");
-					List<InstalledApp> cachedApps = db.getAllApps();
-					Map<String, List<InstalledApp>> bySource = groupBySource(cachedApps);
-					System.out.print(PlainTextFormatter.format(bySource));
-					return;
+					apps = db.getAllApps();
+				} else {
+					// Perform fresh scan
+					System.out.println("[Info] Performing fresh scan...\n");
+					apps = scanSystem();
+					db.updateApps(apps);
 				}
 				
-				// Perform fresh scan
-				System.out.println("[Info] Performing fresh scan...\n");
-				List<InstalledApp> freshApps = scanSystem();
-				
-				// Update database
-				db.updateApps(freshApps);
+				// Check Supabase for threats (every 5 hours)
+				if (!db.wasSupabaseCheckedWithinHours(SUPABASE_CHECK_INTERVAL_HOURS)) {
+					checkSupabaseThreats(apps, db);
+				}
 				
 				// Print results
-				Map<String, List<InstalledApp>> bySource = groupBySource(freshApps);
+				Map<String, List<InstalledApp>> bySource = groupBySource(apps);
 				System.out.print(PlainTextFormatter.format(bySource));
 			}
 		} catch (SQLException e) {
@@ -58,6 +62,62 @@ public final class Main {
 		} catch (IOException e) {
 			System.err.println("[Error] I/O error: " + e.getMessage());
 			System.exit(1);
+		}
+	}
+
+	private static void checkSupabaseThreats(List<InstalledApp> localApps, DatabaseService db) {
+		try {
+			SupabaseService supabase = new SupabaseService();
+			
+			if (!supabase.isConfigured()) {
+				// Supabase not configured, skip silently
+				return;
+			}
+			
+			List<SupabaseService.ThreatMatch> threats = supabase.getActiveThreats();
+			
+			// Match threats to installed apps (case-insensitive)
+			Set<String> localAppNames = localApps.stream()
+				.map(app -> app.name().toLowerCase(Locale.ROOT))
+				.collect(java.util.stream.Collectors.toSet());
+			
+			boolean foundMatch = false;
+			for (SupabaseService.ThreatMatch threat : threats) {
+				String targetAppLower = threat.targetApp().toLowerCase(Locale.ROOT);
+				if (localAppNames.contains(targetAppLower)) {
+					if (!foundMatch) {
+						System.out.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+						System.out.println("⚠️  SECURITY ALERTS");
+						System.out.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+						foundMatch = true;
+					}
+					
+					System.out.println();
+					System.out.println(threat.getSeverityIcon() + " " + threat.title());
+					System.out.println("   App: " + threat.targetApp());
+					if (threat.severity() != null) {
+						System.out.println("   Severity: " + threat.severity());
+					}
+					if (threat.description() != null && !threat.description().isBlank()) {
+						System.out.println("   Details: " + threat.description());
+					}
+					if (threat.url() != null && !threat.url().isBlank()) {
+						System.out.println("   🔗 URL: " + threat.url());
+					}
+				}
+			}
+			
+			if (foundMatch) {
+				System.out.println();
+				System.out.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+				System.out.println();
+			}
+			
+			// Update check timestamp
+			db.updateSupabaseCheckTimestamp();
+			
+		} catch (Exception e) {
+			System.err.println("[Warn] Supabase check failed: " + e.getMessage());
 		}
 	}
 

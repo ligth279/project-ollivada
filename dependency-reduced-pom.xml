@@ -60,6 +60,7 @@
                 <transformer>
                   <mainClass>com.ullivada.zeropanic.applister.Main</mainClass>
                 </transformer>
+                <transformer />
               </transformers>
               <finalName>${project.artifactId}-${project.version}</finalName>
             </configuration>
