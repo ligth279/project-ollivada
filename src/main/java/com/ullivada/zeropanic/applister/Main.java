@@ -149,24 +149,15 @@ public final class Main {
 				return;
 			}
 			
-			List<SupabaseService.ThreatMatch> threats = supabase.getActiveThreats();
+			List<SupabaseService.ThreatMatch> threats = supabase.getActiveThreats(localApps);
 			
-			// Match threats to installed apps (case-insensitive)
-			Set<String> localAppNames = localApps.stream()
-				.map(app -> app.name().toLowerCase(Locale.ROOT))
-				.collect(java.util.stream.Collectors.toSet());
-			
-			boolean foundMatch = false;
-			for (SupabaseService.ThreatMatch threat : threats) {
-				String targetAppLower = threat.targetApp().toLowerCase(Locale.ROOT);
-				if (localAppNames.contains(targetAppLower)) {
-					if (!foundMatch) {
-						System.out.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-						System.out.println("⚠️  SECURITY ALERTS");
-						System.out.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-						foundMatch = true;
-					}
-					
+			// Threats are already filtered by SupabaseService, just display them
+			if (!threats.isEmpty()) {
+				System.out.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+				System.out.println("⚠️  SECURITY ALERTS");
+				System.out.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+				
+				for (SupabaseService.ThreatMatch threat : threats) {
 					System.out.println();
 					System.out.println(threat.getSeverityIcon() + " " + threat.title());
 					System.out.println("   App: " + threat.targetApp());
@@ -182,7 +173,7 @@ public final class Main {
 				}
 			}
 			
-			if (foundMatch) {
+			if (!threats.isEmpty()) {
 				System.out.println();
 				System.out.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 				System.out.println();

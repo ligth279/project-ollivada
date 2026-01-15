@@ -1,5 +1,6 @@
 package com.ullivada.zeropanic.applister.supabase;
 
+import com.ullivada.zeropanic.applister.model.InstalledApp;
 import io.github.cdimascio.dotenv.Dotenv;
 
 import java.io.IOException;
@@ -10,6 +11,7 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -40,10 +42,52 @@ public class SupabaseService {
     }
 
     /**
-     * Query cyber_threats table for active threats using REST API.
-     * Returns list of ThreatMatch objects.
+     * Query cyber_threats table and match against installed apps (filtered).
+     * Returns only threats that match apps in the provided list.
      */
-    public List<ThreatMatch> getActiveThreats() throws IOException, InterruptedException {
+    public List<ThreatMatch> getActiveThreats(List<InstalledApp> installedApps) throws IOException, InterruptedException {
+        if (!isConfigured()) {
+            return List.of();
+        }
+
+        // Get all threats from Supabase
+        List<ThreatMatch> allThreats = getAllThreatsFromSupabase();
+        
+        // Filter to only threats matching installed apps
+        List<ThreatMatch> matchedThreats = new ArrayList<>();
+        for (ThreatMatch threat : allThreats) {
+            for (InstalledApp app : installedApps) {
+                if (appMatchesThreat(app, threat.targetApp())) {
+                    matchedThreats.add(threat);
+                    break; // Don't add duplicate matches
+                }
+            }
+        }
+        
+        return matchedThreats;
+    }
+    
+    /**
+     * Check if an installed app matches a threat target.
+     */
+    private boolean appMatchesThreat(InstalledApp app, String targetApp) {
+        if (targetApp == null || app.name() == null) {
+            return false;
+        }
+        
+        String appNameLower = app.name().toLowerCase(Locale.ROOT);
+        String targetLower = targetApp.toLowerCase(Locale.ROOT);
+        
+        // Exact match or contains
+        return appNameLower.equals(targetLower) || 
+               appNameLower.contains(targetLower) || 
+               targetLower.contains(appNameLower);
+    }
+
+    /**
+     * Query cyber_threats table for all active threats using REST API.
+     */
+    private List<ThreatMatch> getAllThreatsFromSupabase() throws IOException, InterruptedException {
         if (!isConfigured()) {
             return List.of();
         }
