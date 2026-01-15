@@ -105,6 +105,19 @@ public class DatabaseService implements AutoCloseable {
     }
 
     /**
+     * Check if user exists.
+     */
+    public boolean userExists(String username) throws SQLException {
+        String sql = "SELECT 1 FROM users WHERE username = ? LIMIT 1";
+        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+            pstmt.setString(1, username);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                return rs.next();
+            }
+        }
+    }
+
+    /**
      * Check if last scan was within the specified hours.
      */
     public boolean wasScannedWithinHours(int hours) throws SQLException {

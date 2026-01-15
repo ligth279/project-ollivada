@@ -11,6 +11,7 @@ import com.ullivada.zeropanic.applister.format.PlainTextFormatter;
 import com.ullivada.zeropanic.applister.model.InstalledApp;
 import com.ullivada.zeropanic.applister.supabase.SupabaseService;
 
+import java.io.Console;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -23,6 +24,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Scanner;
 import java.util.Set;
 
 public final class Main {
@@ -34,6 +36,12 @@ public final class Main {
 			ensureDatabaseDirectory();
 			
 			try (DatabaseService db = new DatabaseService()) {
+				// Authentication
+				if (!authenticate(db)) {
+					System.err.println("[Error] Authentication failed");
+					System.exit(1);
+				}
+				
 				List<InstalledApp> apps;
 				
 				// Check if we scanned recently
@@ -62,6 +70,73 @@ public final class Main {
 		} catch (IOException e) {
 			System.err.println("[Error] I/O error: " + e.getMessage());
 			System.exit(1);
+		}
+	}
+
+	private static boolean authenticate(DatabaseService db) throws SQLException {
+		Scanner scanner = new Scanner(System.in);
+		Console console = System.console();
+		
+		System.out.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+		System.out.println("         App Lister - Authentication");
+		System.out.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+		System.out.println();
+		
+		System.out.print("Username: ");
+		String username = scanner.nextLine().trim();
+		
+		if (username.isEmpty()) {
+			System.err.println("Username cannot be empty");
+			return false;
+		}
+		
+		// Read password (hidden if console available)
+		String password;
+		if (console != null) {
+			char[] passwordChars = console.readPassword("Password: ");
+			password = new String(passwordChars);
+		} else {
+			System.out.print("Password: ");
+			password = scanner.nextLine();
+		}
+		
+		if (password.isEmpty()) {
+			System.err.println("Password cannot be empty");
+			return false;
+		}
+		
+		// Check if user exists
+		boolean userExists = db.userExists(username);
+		
+		if (userExists) {
+			// Existing user - authenticate
+			if (db.authenticate(username, password)) {
+				System.out.println("✓ Authentication successful\n");
+				return true;
+			} else {
+				System.err.println("✗ Invalid password");
+				return false;
+			}
+		} else {
+			// New user - register
+			System.out.println("[Info] User not found. Creating new account...");
+			System.out.print("Confirm password: ");
+			String confirmPassword;
+			if (console != null) {
+				char[] confirmChars = console.readPassword("");
+				confirmPassword = new String(confirmChars);
+			} else {
+				confirmPassword = scanner.nextLine();
+			}
+			
+			if (!password.equals(confirmPassword)) {
+				System.err.println("Passwords do not match");
+				return false;
+			}
+			
+			db.createUser(username, password);
+			System.out.println("✓ Account created successfully\n");
+			return true;
 		}
 	}
 
