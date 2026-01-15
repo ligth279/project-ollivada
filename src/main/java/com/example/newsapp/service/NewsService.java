@@ -1,17 +1,16 @@
 package com.example.newsapp.service;
 
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
@@ -19,6 +18,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+
+import jakarta.annotation.PostConstruct;
 
 @Service
 public class NewsService {
@@ -29,17 +30,23 @@ public class NewsService {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     @Value("${news.api.url}")
     private String newsApiUrl;
 
     @Value("${news.api.key}")
     private String newsApiKey;
 
-    @Value("${gemini.api.url}")
-    private String geminiApiUrl;
+    @Value("${groq.api.url}")
+    private String groqApiUrl;
 
-    @Value("${gemini.api.key}")
-    private String geminiApiKey;
+    @Value("${groq.api.key}")
+    private String groqApiKey;
+
+    @Value("${groq.model}")
+    private String groqModel;
 
     @Value("${supabase.url}")
     private String supabaseUrl;
@@ -50,10 +57,17 @@ public class NewsService {
     @Value("${supabase.table}")
     private String supabaseTable;
 
-    // We process only Top 5 to ensure we get rich data without timeouts
-    private static final int EXTRACTION_BATCH_LIMIT = 5;
+    // --- SETUP: Create SQLite Table ---
+    @PostConstruct
+    public void initSqlite() {
+        jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS news_buffer (" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, " +
+                "title TEXT UNIQUE, " +
+                "description TEXT, " +
+                "url TEXT, " +
+                "processed BOOLEAN DEFAULT 0)");
+    }
 
-    // Keyword Weights for Algorithmic Filtering
     private static final Map<String, Integer> KEYWORD_WEIGHTS = new HashMap<>();
     static {
         KEYWORD_WEIGHTS.put("ransomware", 10);
@@ -61,48 +75,159 @@ public class NewsService {
         KEYWORD_WEIGHTS.put("exploit", 8);
         KEYWORD_WEIGHTS.put("patch", 5);
         KEYWORD_WEIGHTS.put("breach", 5);
-        KEYWORD_WEIGHTS.put("bug", 3);
-        KEYWORD_WEIGHTS.put("flaw", 3);
-        KEYWORD_WEIGHTS.put("hack", 2);
+        KEYWORD_WEIGHTS.put("security", 3);
+        KEYWORD_WEIGHTS.put("cyber", 3);
     }
 
-    public Object getNewsHeadlines() {
-        // 1. Fetch News
+    // ==========================================
+    // PHASE 1: COLLECT (Fetch -> Filter -> SQLite)
+    // ==========================================
+    public Object fetchAndBufferNews() {
         String url = newsApiUrl + newsApiKey;
         JsonNode root = restTemplate.getForObject(url, JsonNode.class);
         JsonNode articlesNode = root.path("articles");
+        int savedCount = 0;
 
-        List<JsonNode> filteredArticles = new ArrayList<>();
-
-        // 2. Filter Locally (Algorithm Only)
         if (articlesNode.isArray()) {
             for (JsonNode article : articlesNode) {
                 String title = article.path("title").asText("").trim();
-                int score = calculateScore(title.toLowerCase());
                 
-                // Keep only relevant news (Score > 3)
-                if (score >= 3) {
-                    filteredArticles.add(article);
+                if (calculateScore(title.toLowerCase()) >= 3) {
+                    try {
+                        String desc = article.path("description").asText("");
+                        String articleUrl = article.path("url").asText("");
+                        
+                        int rows = jdbcTemplate.update(
+                            "INSERT OR IGNORE INTO news_buffer (title, description, url, processed) VALUES (?, ?, ?, 0)",
+                            title, desc, articleUrl
+                        );
+                        savedCount += rows;
+                    } catch (Exception e) {
+                        System.err.println("SQLite Error: " + e.getMessage());
+                    }
                 }
             }
         }
+        
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("status", "Buffered");
+        response.put("new_items_saved", savedCount);
+        return response;
+    }
 
-        System.out.println("Algorithm found " + filteredArticles.size() + " relevant articles.");
+    // ==========================================
+    // PHASE 2: EXTRACT (SQLite -> Groq -> Supabase)
+    // ==========================================
+    public Object processPendingNews() {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+            "SELECT * FROM news_buffer WHERE processed = 0 LIMIT 20"
+        );
 
-        // 3. Take Top X for Extraction
-        List<JsonNode> batchToProcess = filteredArticles.stream()
-                .limit(EXTRACTION_BATCH_LIMIT)
-                .collect(Collectors.toList());
-
-        // 4. Extract Data using Gemini & Store in Supabase
-        if (!batchToProcess.isEmpty()) {
-            extractAndStoreData(batchToProcess);
+        if (rows.isEmpty()) {
+            return "No pending news to process.";
         }
 
+        int successCount = extractAndUploadWithGroq(rows);
+
         ObjectNode response = objectMapper.createObjectNode();
-        response.put("status", "Success");
-        response.put("message", "Processed and stored " + batchToProcess.size() + " articles in Supabase.");
+        response.put("status", "Processed");
+        response.put("count", successCount);
         return response;
+    }
+
+private int extractAndUploadWithGroq(List<Map<String, Object>> rows) {
+        int uploaded = 0;
+        try {
+            // 1. Prepare Prompt (Strict Single-Entity Extraction)
+            StringBuilder prompt = new StringBuilder();
+            prompt.append("Extract the specific software or app name from these headlines.\n");
+            prompt.append("Format: Return a JSON Array of objects: [{\"target_app\": \"Name\", \"severity\": \"Level\"}].\n\n");
+            
+            prompt.append("RULES for 'target_app':\n");
+            prompt.append("1. EXTRACT ONLY THE PRODUCT NAME (e.g., 'Chrome', 'Windows', 'Zoom').\n");
+            prompt.append("2. MAX 2 WORDS. Do not include versions (like 'v2.0').\n");
+            prompt.append("3. IF IT IS A COUNTRY (e.g., 'Iran', 'China') or HACKER GROUP -> RETURN 'Unknown'.\n");
+            prompt.append("4. IF UNSURE -> RETURN 'Unknown'.\n\n");
+            
+            prompt.append("EXAMPLES:\n");
+            prompt.append("Input: 'Critical flaw in Google Chrome allows remote code execution'\n");
+            prompt.append("Output: \"Chrome\"\n");
+            prompt.append("Input: 'Iran hackers target Israel water systems'\n");
+            prompt.append("Output: \"Unknown\" (Country is not an App)\n");
+            prompt.append("Input: 'Microsoft Outlook vulnerability exposed'\n");
+            prompt.append("Output: \"Outlook\"\n");
+            prompt.append("Input: 'New ransomware attacks US hospitals'\n");
+            prompt.append("Output: \"Unknown\" (Sector is not an App)\n\n");
+            
+            prompt.append("TASK INPUT:\n");
+
+            for (int i = 0; i < rows.size(); i++) {
+                String title = (String) rows.get(i).get("title");
+                // Remove extra noise characters to keep it clean
+                title = title.replaceAll("[^a-zA-Z0-9 .:-]", ""); 
+                prompt.append(i + ": " + title + "\n");
+            }
+
+            // 2. Build Groq Request (OpenAI Format)
+            ObjectNode requestBody = objectMapper.createObjectNode();
+            requestBody.put("model", groqModel);
+            
+            ArrayNode messages = objectMapper.createArrayNode();
+            ObjectNode systemMsg = objectMapper.createObjectNode();
+            systemMsg.put("role", "system");
+            systemMsg.put("content", "You are a strict JSON extractor.");
+            messages.add(systemMsg);
+            
+            ObjectNode userMsg = objectMapper.createObjectNode();
+            userMsg.put("role", "user");
+            userMsg.put("content", prompt.toString());
+            messages.add(userMsg);
+            
+            requestBody.set("messages", messages);
+
+            // 3. Send Request
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.set("Authorization", "Bearer " + groqApiKey);
+
+            HttpEntity<JsonNode> entity = new HttpEntity<>(requestBody, headers);
+            JsonNode response = restTemplate.postForObject(groqApiUrl, entity, JsonNode.class);
+
+            // 4. Parse Groq Response
+            if (response != null && response.has("choices")) {
+                String content = response.path("choices").get(0)
+                        .path("message").path("content").asText();
+                
+                // Clean up any potential markdown backticks
+                content = content.replace("```json", "").replace("```", "").trim();
+                
+                JsonNode extractedArray = objectMapper.readTree(content);
+
+                if (extractedArray.isArray()) {
+                    for (int i = 0; i < extractedArray.size(); i++) {
+                        JsonNode item = extractedArray.get(i);
+                        Map<String, Object> originalRow = rows.get(i);
+                        
+                        boolean sent = saveToSupabase(
+                            (String) originalRow.get("title"),
+                            item.path("target_app").asText("Unknown"),
+                            (String) originalRow.get("description"),
+                            item.path("severity").asText("Unknown"),
+                            (String) originalRow.get("url")
+                        );
+
+                        if (sent) {
+                            jdbcTemplate.update("UPDATE news_buffer SET processed = 1 WHERE id = ?", originalRow.get("id"));
+                            uploaded++;
+                        }
+                    }
+                }
+            }
+
+        } catch (Exception e) {
+            System.err.println("Groq Extraction Failed: " + e.getMessage());
+        }
+        return uploaded;
     }
 
     private int calculateScore(String title) {
@@ -115,107 +240,27 @@ public class NewsService {
         return score;
     }
 
-    // --- GEMINI EXTRACTION & SUPABASE STORAGE ---
-    private void extractAndStoreData(List<JsonNode> articles) {
+    private boolean saveToSupabase(String title, String app, String desc, String sev, String url) {
         try {
-            // A. Prepare Prompt
-            StringBuilder prompt = new StringBuilder();
-            prompt.append("Analyze the following news headlines and descriptions. ");
-            prompt.append("Extract structured data for a security database. ");
-            prompt.append("Return strictly a JSON Array of objects with these keys: ");
-            prompt.append("'title', 'target_app' (the specific app/company affected, e.g. 'Zoom', 'Windows', or 'Unknown'), ");
-            prompt.append("'description' (short summary), 'severity' (Low, Medium, High, Critical). ");
-            prompt.append("Input Data:\n");
-
-            for (int i = 0; i < articles.size(); i++) {
-                JsonNode a = articles.get(i);
-                String t = a.path("title").asText("").replace("\"", "'");
-                String d = a.path("description").asText("").replace("\"", "'");
-                // Pass the original URL so we can map it back later if needed, 
-                // but Gemini output doesn't strictly need to echo it back if we map by index.
-                // To keep it simple, we ask Gemini to return the index or we map by order.
-                prompt.append("Item " + i + ": Title: " + t + " | Desc: " + d + "\n");
-            }
-
-            // B. Call Gemini
-            ObjectNode contentNode = objectMapper.createObjectNode();
-            ObjectNode partNode = objectMapper.createObjectNode();
-            partNode.put("text", prompt.toString());
-            ArrayNode partsArray = objectMapper.createArrayNode();
-            partsArray.add(partNode);
-            contentNode.set("parts", partsArray);
-            ArrayNode contentsArray = objectMapper.createArrayNode();
-            contentsArray.add(contentNode);
-            ObjectNode requestBody = objectMapper.createObjectNode();
-            requestBody.set("contents", contentsArray);
-
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            HttpEntity<JsonNode> entity = new HttpEntity<>(requestBody, headers);
-
-            String geminiUrl = geminiApiUrl + geminiApiKey;
-            JsonNode response = restTemplate.postForObject(geminiUrl, entity, JsonNode.class);
-
-            // C. Parse Gemini Response
-            if (response != null && response.has("candidates")) {
-                String rawText = response.path("candidates").get(0)
-                        .path("content").path("parts").get(0)
-                        .path("text").asText();
-                
-                // Clean Markdown
-                rawText = rawText.replace("```json", "").replace("```", "").trim();
-                
-                JsonNode extractedData = objectMapper.readTree(rawText);
-
-                // D. Push to Supabase
-                if (extractedData.isArray()) {
-                    for (int i = 0; i < extractedData.size(); i++) {
-                        JsonNode item = extractedData.get(i);
-                        
-                        // Merge the original URL back in (since Gemini doesn't generate URLs)
-                        String originalUrl = "";
-                        if (i < articles.size()) {
-                            originalUrl = articles.get(i).path("url").asText();
-                        }
-
-                        saveToSupabase(item, originalUrl);
-                    }
-                }
-            }
-
-        } catch (Exception e) {
-            System.err.println("Extraction Failed: " + e.getMessage());
-            e.printStackTrace();
-        }
-    }
-
-    private void saveToSupabase(JsonNode geminiData, String originalUrl) {
-        try {
-            // Build the JSON payload for Supabase
             ObjectNode payload = objectMapper.createObjectNode();
-            payload.put("title", geminiData.path("title").asText());
-            payload.put("target_app", geminiData.path("target_app").asText());
-            payload.put("description", geminiData.path("description").asText());
-            payload.put("severity", geminiData.path("severity").asText());
-            payload.put("url", originalUrl);
+            payload.put("title", title);
+            payload.put("target_app", app);
+            payload.put("description", desc);
+            payload.put("severity", sev);
+            payload.put("url", url);
 
-            // Prepare Request
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             headers.set("apikey", supabaseKey);
             headers.set("Authorization", "Bearer " + supabaseKey);
-            headers.set("Prefer", "return=minimal"); // Don't return the full object, just 201 Created
+            headers.set("Prefer", "return=minimal");
 
             HttpEntity<String> entity = new HttpEntity<>(payload.toString(), headers);
-
-            // Send POST
-            String dbUrl = supabaseUrl + "/rest/v1/" + supabaseTable;
-            restTemplate.postForEntity(dbUrl, entity, String.class);
-
-            System.out.println("Saved to Supabase: " + geminiData.path("target_app").asText());
-
+            restTemplate.postForEntity(supabaseUrl + "/rest/v1/" + supabaseTable, entity, String.class);
+            return true;
         } catch (Exception e) {
-            System.err.println("Supabase Insert Failed: " + e.getMessage());
+            System.err.println("DB Upload Failed: " + e.getMessage());
+            return false;
         }
     }
 }
