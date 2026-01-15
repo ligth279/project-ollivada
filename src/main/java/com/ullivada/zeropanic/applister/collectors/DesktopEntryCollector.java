@@ -1,6 +1,7 @@
 package com.ullivada.zeropanic.applister.collectors;
 
 import com.ullivada.zeropanic.applister.model.InstalledApp;
+import com.ullivada.zeropanic.applister.util.OSDetector;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -22,7 +23,7 @@ public final class DesktopEntryCollector implements InstalledAppCollector {
 
 	@Override
 	public List<InstalledApp> collect() {
-		if (isWindows()) {
+		if (OSDetector.isWindows()) {
 			return List.of();
 		}
 		
@@ -74,11 +75,6 @@ public final class DesktopEntryCollector implements InstalledAppCollector {
 		}
 
 		return out;
-	}
-
-	private boolean isWindows() {
-		String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
-		return os.contains("win");
 	}
 
 	private Optional<InstalledApp> parseDesktopFile(Path path) {

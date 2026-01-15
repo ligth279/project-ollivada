@@ -1,6 +1,7 @@
 package com.ullivada.zeropanic.applister.collectors;
 
 import com.ullivada.zeropanic.applister.model.InstalledApp;
+import com.ullivada.zeropanic.applister.util.OSDetector;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -22,7 +23,7 @@ public final class WindowsRegistryCollector implements InstalledAppCollector {
 
 	@Override
 	public List<InstalledApp> collect() {
-		if (!isWindows()) {
+		if (!OSDetector.isWindows()) {
 			return List.of();
 		}
 
@@ -38,11 +39,6 @@ public final class WindowsRegistryCollector implements InstalledAppCollector {
 		System.err.println("[DEBUG] Total after HKCU: " + apps.size());
 		
 		return apps;
-	}
-
-	private boolean isWindows() {
-		String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
-		return os.contains("win");
 	}
 
 	private List<InstalledApp> readUninstallKey(String registryPath) {
