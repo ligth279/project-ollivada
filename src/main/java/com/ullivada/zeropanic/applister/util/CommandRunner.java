@@ -14,10 +14,18 @@ public final class CommandRunner {
 
 	public static boolean isCommandAvailable(String command) {
 		try {
-			Process p = new ProcessBuilder("sh", "-lc", "command -v " + escapeSh(command) + " >/dev/null 2>&1")
-					.redirectErrorStream(true)
-					.start();
-			return p.waitFor() == 0;
+			// On Windows, use 'where' command; on Unix, use 'command -v'
+			if (OSDetector.isWindows()) {
+				Process p = new ProcessBuilder("cmd.exe", "/c", "where", command)
+						.redirectErrorStream(true)
+						.start();
+				return p.waitFor() == 0;
+			} else {
+				Process p = new ProcessBuilder("sh", "-lc", "command -v " + escapeSh(command) + " >/dev/null 2>&1")
+						.redirectErrorStream(true)
+						.start();
+				return p.waitFor() == 0;
+			}
 		} catch (Exception e) {
 			return false;
 		}
