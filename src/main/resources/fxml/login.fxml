@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+
+<StackPane xmlns="http://javafx.com/javafx"
+           xmlns:fx="http://javafx.com/fxml"
+           fx:controller="com.ullivada.zeropanic.applister.javafx.controllers.LoginController"
+           styleClass="animated-gradient"
+           stylesheets="@../css/style.css">
+    
+    <VBox alignment="CENTER" spacing="30" styleClass="login-container" maxWidth="450" maxHeight="600">
+        <padding>
+            <Insets top="50" right="50" bottom="50" left="50"/>
+        </padding>
+        
+        <!-- Logo/Title -->
+        <VBox alignment="CENTER" spacing="10">
+            <Label text="🛡️ ZeroPanic" styleClass="label-title"/>
+            <Label text="Context-Aware Cyber Intelligence" styleClass="label-subtitle"/>
+        </VBox>
+        
+        <!-- Login Form -->
+        <VBox spacing="20" fx:id="loginForm">
+            <VBox spacing="8">
+                <Label text="Username" style="-fx-font-weight: 500;"/>
+                <TextField fx:id="usernameField" promptText="Enter your username"/>
+            </VBox>
+            
+            <VBox spacing="8">
+                <Label text="Password" style="-fx-font-weight: 500;"/>
+                <PasswordField fx:id="passwordField" promptText="Enter your password"/>
+            </VBox>
+            
+            <!-- Error Message -->
+            <Label fx:id="errorLabel" textFill="#FF4757" visible="false" wrapText="true"/>
+            
+            <!-- Login Button -->
+            <Button text="Login" styleClass="button-primary" onAction="#handleLogin" 
+                    prefWidth="350" defaultButton="true"/>
+            
+            <!-- Divider -->
+            <Separator style="-fx-background-color: rgba(106, 255, 61, 0.2);"/>
+            
+            <!-- Create Account Button -->
+            <Button text="Create New Account" styleClass="button-secondary" 
+                    onAction="#showRegisterForm" prefWidth="350"/>
+        </VBox>
+        
+        <!-- Register Form (Hidden Initially) -->
+        <VBox spacing="20" fx:id="registerForm" visible="false" managed="false">
+            <VBox spacing="8">
+                <Label text="Username" style="-fx-font-weight: 500;"/>
+                <TextField fx:id="registerUsernameField" promptText="Choose a username"/>
+            </VBox>
+            
+            <VBox spacing="8">
+                <Label text="Password" style="-fx-font-weight: 500;"/>
+                <PasswordField fx:id="registerPasswordField" promptText="Choose a password (min 6 chars)"/>
+            </VBox>
+            
+            <VBox spacing="8">
+                <Label text="Confirm Password" style="-fx-font-weight: 500;"/>
+                <PasswordField fx:id="confirmPasswordField" promptText="Re-enter your password"/>
+            </VBox>
+            
+            <!-- Error Message -->
+            <Label fx:id="registerErrorLabel" textFill="#FF4757" visible="false" wrapText="true"/>
+            
+            <!-- Register Button -->
+            <Button text="Create Account" styleClass="button-primary" onAction="#handleRegister" 
+                    prefWidth="350" defaultButton="true"/>
+            
+            <!-- Back to Login -->
+            <Button text="Back to Login" styleClass="button-secondary" 
+                    onAction="#showLoginForm" prefWidth="350"/>
+        </VBox>
+        
+        <!-- Footer -->
+        <Label text="Powered by ZeroPanic Security" 
+               style="-fx-text-fill: #B8C5D6; -fx-font-size: 12px;"/>
+    </VBox>
+    
+</StackPane>

@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+
+<BorderPane xmlns="http://javafx.com/javafx"
+            xmlns:fx="http://javafx.com/fxml"
+            fx:controller="com.ullivada.zeropanic.applister.javafx.controllers.MainController"
+            styleClass="main-container"
+            stylesheets="@../css/style.css">
+    
+    <!-- Sidebar -->
+    <left>
+        <VBox styleClass="sidebar" prefWidth="250" spacing="5">
+            <padding>
+                <Insets top="20" right="0" bottom="20" left="0"/>
+            </padding>
+            
+            <!-- App Title -->
+            <VBox alignment="CENTER" spacing="5" VBox.vgrow="NEVER">
+                <padding>
+                    <Insets bottom="30"/>
+                </padding>
+                <Label text="🛡️ ZeroPanic" style="-fx-font-size: 24px; -fx-font-weight: 700; -fx-text-fill: #000000;"/>
+                <Label fx:id="usernameLabel" text="User" style="-fx-font-size: 12px; -fx-text-fill: #333333;"/>
+            </VBox>
+            
+            <!-- Navigation Buttons -->
+            <Button text="🚨 Alerts" fx:id="alertsButton" styleClass="sidebar-button,active" 
+                    onAction="#showAlertsPanel" prefWidth="250"/>
+            <Button text="📱 All Apps" fx:id="appsButton" styleClass="sidebar-button" 
+                    onAction="#showAppsPanel" prefWidth="250"/>
+            
+            <!-- Spacer -->
+            <Region VBox.vgrow="ALWAYS"/>
+            
+            <!-- Action Buttons -->
+            <Separator style="-fx-background-color: rgba(106, 255, 61, 0.2);"/>
+            <Button text="🔄 Force Scan" styleClass="sidebar-button" 
+                    onAction="#handleForceScan" prefWidth="250"/>
+            <Button text="🚪 Logout" styleClass="sidebar-button" 
+                    onAction="#handleLogout" prefWidth="250" 
+                    style="-fx-text-fill: #FF4757;"/>
+        </VBox>
+    </left>
+    
+    <!-- Main Content Area -->
+    <center>
+        <StackPane fx:id="contentPane" style="-fx-background-color: #FFFFFF;">
+            
+            <!-- Alerts Panel (Default View) -->
+            <VBox fx:id="alertsPanel" spacing="20" visible="true">
+                <padding>
+                    <Insets top="30" right="30" bottom="30" left="30"/>
+                </padding>
+                
+                <!-- Header -->
+                <HBox alignment="CENTER_LEFT" spacing="20">
+                    <Label text="Security Alerts" styleClass="label-section-title"/>
+                    <Region HBox.hgrow="ALWAYS"/>
+                    <Label fx:id="lastCheckLabel" text="Last check: Never" 
+                           style="-fx-text-fill: #666666; -fx-font-size: 12px;"/>
+                </HBox>
+                
+                <!-- Threat Count Stats -->
+                <HBox spacing="20">
+                    <VBox styleClass="stats-card" spacing="5" HBox.hgrow="ALWAYS">
+                        <Label text="TOTAL THREATS" style="-fx-font-size: 12px; -fx-text-fill: #666666; -fx-font-weight: 600;"/>
+                        <Label fx:id="totalThreatsLabel" text="0" style="-fx-font-size: 32px; -fx-font-weight: 700; -fx-text-fill: #FF4757;"/>
+                    </VBox>
+                    <VBox styleClass="stats-card" spacing="5" HBox.hgrow="ALWAYS">
+                        <Label text="INSTALLED APPS" style="-fx-font-size: 12px; -fx-text-fill: #666666; -fx-font-weight: 600;"/>
+                        <Label fx:id="totalAppsLabel" text="0" style="-fx-font-size: 32px; -fx-font-weight: 700; -fx-text-fill: #000000;"/>
+                    </VBox>
+                </HBox>
+                
+                <!-- Threats List -->
+                <ScrollPane fitToWidth="true" style="-fx-background: transparent; -fx-background-color: transparent;">
+                    <VBox fx:id="threatsContainer" spacing="15">
+                        <!-- Threats will be added dynamically -->
+                        <Label fx:id="noThreatsLabel" text="✅ No threats detected. Your system is safe!" 
+                               styleClass="no-data-label" visible="false"/>
+                    </VBox>
+                </ScrollPane>
+            </VBox>
+            
+            <!-- All Apps Panel -->
+            <VBox fx:id="appsPanel" spacing="20" visible="false" managed="false">
+                <padding>
+                    <Insets top="30" right="30" bottom="30" left="30"/>
+                </padding>
+                
+                <!-- Header -->
+                <HBox alignment="CENTER_LEFT" spacing="20">
+                    <Label text="Installed Applications" styleClass="label-section-title"/>
+                    <Region HBox.hgrow="ALWAYS"/>
+                    <Label fx:id="appCountLabel" text="0 apps" 
+                           style="-fx-text-fill: #666666; -fx-font-size: 14px;"/>
+                </HBox>
+                
+                <!-- Search Box -->
+                <TextField fx:id="searchField" promptText="🔍 Search applications..." 
+                          onKeyReleased="#handleSearch"/>
+                
+                <!-- Apps Table -->
+                <TableView fx:id="appsTable" VBox.vgrow="ALWAYS">
+                    <columns>
+                        <TableColumn fx:id="appNameColumn" text="Application Name" prefWidth="300"/>
+                        <TableColumn fx:id="appSourceColumn" text="Source" prefWidth="150"/>
+                        <TableColumn fx:id="appVersionColumn" text="Version" prefWidth="150"/>
+                        <TableColumn fx:id="appIdColumn" text="ID" prefWidth="250"/>
+                    </columns>
+                </TableView>
+            </VBox>
+            
+        </StackPane>
+    </center>
+    
+</BorderPane>

@@ -25,7 +25,17 @@ public class SupabaseService {
     private final HttpClient httpClient;
 
     public SupabaseService() {
-        Dotenv dotenv = Dotenv.configure().ignoreIfMissing().load();
+        // Try to load from classpath resources first (for packaged app), then from file system (for dev)
+        Dotenv dotenv = Dotenv.configure()
+            .directory("/") // Search from classpath root
+            .ignoreIfMissing()
+            .load();
+        
+        // If not found in resources, try current directory (development mode)
+        if (dotenv.get("SUPABASE_URL") == null) {
+            dotenv = Dotenv.configure().ignoreIfMissing().load();
+        }
+        
         this.supabaseUrl = dotenv.get("SUPABASE_URL");
         this.anonKey = dotenv.get("SUPABASE_ANON_KEY");
         this.httpClient = HttpClient.newBuilder()
